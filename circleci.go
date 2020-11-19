@@ -635,6 +635,16 @@ func (c *Client) AddHerokuKey(key string) error {
 	return c.request("POST", "v1", "/user/heroku-key", nil, nil, body)
 }
 
+// GetWorkFlow gets a single workflow by its unique id using the v2 api
+func (c *Client) GetWorkflow(workflowID string) (*WorkflowV2, error) {
+	workflow := &WorkflowV2{}
+	err := c.request("GET", "v2", fmt.Sprintf("workflow/%s", workflowID), &workflow, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return workflow, nil
+}
+
 // EnvVar represents an environment variable
 type EnvVar struct {
 	Name  string `json:"name"`
@@ -1070,6 +1080,20 @@ type BuildByProjectResponse struct {
 	Status int    `json:"status"`
 	Body   string `json:"body"`
 }
+
+// WorkflowV2 represents a workflow object when using the v2 api
+type WorkflowV2 struct {
+	PipelineID     string    `json:"pipeline_id"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	ProjectSlug    string    `json:"project_slug"`
+	Status         string    `json:"status"`
+	StartedBy      string    `json:"started_by"`
+	PipelineNumber int       `json:"pipeline_number"`
+	CreatedAt      time.Time `json:"created_at"`
+	StoppedAt      time.Time `json:"stopped_at"`
+}
+
 
 // clean up project returned from API by:
 // * url decoding branch names (https://discuss.circleci.com/t/api-returns-url-encoded-branch-names-in-json-response/18524/5)

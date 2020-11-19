@@ -3,6 +3,7 @@ package circleci
 import (
 	"bytes"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 var (
@@ -1106,4 +1108,40 @@ func TestClient_AddHerokuKey(t *testing.T) {
 	if err != nil {
 		t.Errorf("Client.AddHerokuKey(53433a12-9c99-11e5-97f5-1458d009721) returned error: %v", err)
 	}
+}
+
+func TestClient_GetWorkflow(t *testing.T) {
+	setup()
+	defer teardown()
+
+	uuid := "9807f232-831b-4742-8e76-028c42d9009e"
+	dateStr := "2020-11-18T08:49:36Z"
+	date, err := time.Parse(time.RFC3339, dateStr)
+	if err != nil {
+		t.Error(err)
+	}
+
+	cciFunc("v2", fmt.Sprintf("/workflow/%s", uuid), func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "GET")
+		fmt.Fprint(w, `{ "pipeline_id": "foo", "id": "9807f232-831b-4742-8e76-028c42d9009e", "name": "build", "project_slug": "gh/foo/bar", "status": "success", "started_by": "baz", "pipeline_number": 2504, "created_at": "2020-11-18T08:49:36Z", "stopped_at": "2020-11-18T08:49:36Z" }`)
+	})
+
+	workflow, err := client.GetWorkflow(uuid)
+	if err != nil {
+		t.Errorf("Client.GetWorkFlow(%s) returned error: %v", uuid, err)
+	}
+
+	want := &WorkflowV2{
+		PipelineID:     "foo",
+		ID:             uuid,
+		Name:           "build",
+		ProjectSlug:    "gh/foo/bar",
+		Status:         "success",
+		StartedBy:      "baz",
+		PipelineNumber: 2504,
+		CreatedAt:      date,
+		StoppedAt:      date,
+	}
+
+	assert.Equal(t, workflow, want)
 }
