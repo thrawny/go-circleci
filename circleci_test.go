@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path"
 	"reflect"
 	"strings"
 	"testing"
@@ -38,6 +39,10 @@ func setup() {
 
 func teardown() {
 	defer server.Close()
+}
+
+func cciFunc(apiVersion string, pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	mux.HandleFunc(path.Join("/", apiVersion, pattern), handler)
 }
 
 func testBody(t *testing.T, r *http.Request, want string) {
@@ -89,19 +94,26 @@ func testHeader(t *testing.T, r *http.Request, header string, want string) {
 	}
 }
 
+func testPath(t *testing.T, r *http.Request, want string) {
+	if got := r.URL.Path; got != want {
+		t.Errorf("r.URL.Path returned %s, want %s", got, want)
+	}
+}
+
 func TestClient_request(t *testing.T) {
 	setup()
 	defer teardown()
 	client.Token = "ABCD"
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
+		testPath(t, r, "/v1/me")
 		testHeader(t, r, "Accept", "application/json")
 		testHeader(t, r, "Content-Type", "application/json")
 		testQueryIncludes(t, r, "circle-token", "ABCD")
 		fmt.Fprint(w, `{"login": "jszwedko"}`)
 	})
 
-	err := client.request("GET", "/me", &User{}, nil, nil)
+	err := client.request("GET", "v1", "/me", &User{}, nil, nil)
 	if err != nil {
 		t.Errorf(`Client.request("GET", "/me", &User{}, nil, nil) errored with %s`, err)
 	}
@@ -111,7 +123,7 @@ func TestClient_requestOverridesCircleToken(t *testing.T) {
 	setup()
 	defer teardown()
 	client.Token = "ABCD"
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testHeader(t, r, "Accept", "application/json")
 		testHeader(t, r, "Content-Type", "application/json")
@@ -121,7 +133,7 @@ func TestClient_requestOverridesCircleToken(t *testing.T) {
 	values := url.Values{}
 	values.Set("circle-token", "pre-existing")
 
-	err := client.request("GET", "/me", &User{}, values, nil)
+	err := client.request("GET", "v1", "/me", &User{}, values, nil)
 	if err != nil {
 		t.Errorf(`Client.request("GET", "/me", &User{}, nil, nil) errored with %s`, err)
 	}
@@ -134,7 +146,7 @@ func TestClient_request_withDebug(t *testing.T) {
 	client.Token = "ABCD"
 	client.Debug = true
 	client.Logger = log.New(buf, "", 0)
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testHeader(t, r, "Accept", "application/json")
 		testHeader(t, r, "Content-Type", "application/json")
@@ -142,7 +154,7 @@ func TestClient_request_withDebug(t *testing.T) {
 		fmt.Fprint(w, `{"login": "jszwedko"}`)
 	})
 
-	err := client.request("GET", "/me", &User{}, nil, nil)
+	err := client.request("GET", "v1", "/me", &User{}, nil, nil)
 	if err != nil {
 		t.Errorf(`Client.request("GET", "/me", &User{}, nil, nil) errored with %s`, err)
 	}
@@ -168,32 +180,32 @@ func TestClient_request_withDebug(t *testing.T) {
 func TestClient_request_unauthenticated(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"message": "You must log in first"}`)
 	})
 
-	err := client.request("GET", "/me", &User{}, nil, nil)
+	err := client.request("GET", "v1", "/me", &User{}, nil, nil)
 	testAPIError(t, err, http.StatusUnauthorized, "You must log in first")
 }
 
 func TestClient_request_noErrorMessage(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 
-	err := client.request("GET", "/me", &User{}, nil, nil)
+	err := client.request("GET", "v1", "/me", &User{}, nil, nil)
 	testAPIError(t, err, http.StatusInternalServerError, "")
 }
 
 func TestClient_Me(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"login": "jszwedko"}`)
 	})
@@ -212,7 +224,7 @@ func TestClient_Me(t *testing.T) {
 func TestClient_ListProjects(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[{"reponame": "foo"}]`)
 	})
@@ -231,7 +243,7 @@ func TestClient_ListProjects(t *testing.T) {
 func TestClient_ListProjects_parseFeatureFlagsRaw(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `
 		[{
@@ -256,7 +268,7 @@ func TestClient_ListProjects_parseFeatureFlagsRaw(t *testing.T) {
 func TestClient_ListProjects_parseNullableFeatureFlags(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `
 		[{
@@ -286,7 +298,7 @@ func TestClient_ListProjects_parseNullableFeatureFlags(t *testing.T) {
 func TestClient_EnableProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 	})
 
@@ -299,7 +311,7 @@ func TestClient_EnableProject(t *testing.T) {
 func TestClient_DisableProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 	})
 
@@ -312,7 +324,7 @@ func TestClient_DisableProject(t *testing.T) {
 func TestClient_FollowProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/org-name/repo-name/follow", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/org-name/repo-name/follow", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"reponame": "repo-name"}`)
 	})
@@ -331,7 +343,7 @@ func TestClient_FollowProject(t *testing.T) {
 func TestClient_UnfollowProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/org-name/repo-name/unfollow", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/org-name/repo-name/unfollow", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"reponame": "repo-name"}`)
 	})
@@ -350,7 +362,7 @@ func TestClient_UnfollowProject(t *testing.T) {
 func TestClient_GetProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[
 			{"username": "jszwedko", "reponame": "bar"},
@@ -373,7 +385,7 @@ func TestClient_GetProject(t *testing.T) {
 func TestClient_GetProject_noMatching(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[
 			{"username": "jszwedko", "reponame": "bar"}
@@ -393,7 +405,7 @@ func TestClient_GetProject_noMatching(t *testing.T) {
 func TestClient_GetProject_urlDecodeBranches(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		// using Fprintf instead Fprint because `go vet` complains about a possible intention to use a formatted string
 		fmt.Fprintf(w, `[
@@ -417,7 +429,7 @@ func TestClient_recentBuilds_multiPage(t *testing.T) {
 	defer teardown()
 
 	requestCount := 0
-	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(200)
 		switch requestCount {
@@ -449,7 +461,7 @@ func TestClient_recentBuilds_multiPageExhausted(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "offset", "0")
 		testQueryIncludes(t, r, "limit", "100")
@@ -471,7 +483,7 @@ func TestClient_recentBuilds_multiPageNoLimit(t *testing.T) {
 	defer teardown()
 
 	requestCount := 0
-	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(200)
 		switch requestCount {
@@ -502,7 +514,7 @@ func TestClient_recentBuilds_multiPageNoLimit(t *testing.T) {
 func TestClient_ListRecentBuilds(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "offset", "2")
 		testQueryIncludes(t, r, "limit", "10")
@@ -523,7 +535,7 @@ func TestClient_ListRecentBuilds(t *testing.T) {
 func TestClient_ListRecentBuildsForProject(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/foo/bar/tree/master", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/foo/bar/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "filter", "running")
 		testQueryIncludes(t, r, "offset", "0")
@@ -547,7 +559,7 @@ func TestClient_ListRecentBuildsForProject(t *testing.T) {
 func TestClient_ListRecentBuildsForProject_noBranch(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/foo/bar", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/foo/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "filter", "running")
 		testQueryIncludes(t, r, "offset", "0")
@@ -571,7 +583,7 @@ func TestClient_ListRecentBuildsForProject_noBranch(t *testing.T) {
 func TestClient_GetBuild(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/123", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"build_num": 123}`)
 	})
@@ -590,7 +602,7 @@ func TestClient_GetBuild(t *testing.T) {
 func TestClient_ListBuildArtifacts(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/123/artifacts", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[{"Path": "/some/path"}]`)
 	})
@@ -609,7 +621,7 @@ func TestClient_ListBuildArtifacts(t *testing.T) {
 func TestClient_ListTestMetadata(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/123/tests", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123/tests", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"tests": [{"name": "some test"}]}`)
 	})
@@ -628,7 +640,7 @@ func TestClient_ListTestMetadata(t *testing.T) {
 func TestClient_Build(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
 	})
@@ -648,7 +660,7 @@ func TestClient_ParameterizedBuild(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testBody(t, r, `{"build_parameters":{"param":"foo"}}`)
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
@@ -673,7 +685,7 @@ func TestClient_BuildOpts(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testBody(t, r, `{"build_parameters":{"param":"foo"},"revision":"SHA"}`)
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
@@ -701,7 +713,7 @@ func TestClient_BuildByProjectBranch(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
 		testBody(t, r, `{"branch":"master"}`)
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"status": 200, "body": "Build created"}`)
@@ -717,7 +729,7 @@ func TestClient_BuildByProjectRevision(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
 		testBody(t, r, `{"revision":"SHA"}`)
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"status": 200, "body": "Build created"}`)
@@ -733,7 +745,7 @@ func TestClient_BuildByProjectTag(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/github/jszwedko/foo/build", func(w http.ResponseWriter, r *http.Request) {
 		testBody(t, r, `{"tag":"v0.0.1"}`)
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"status": 200, "body": "Build created"}`)
@@ -748,7 +760,7 @@ func TestClient_BuildByProjectTag(t *testing.T) {
 func TestClient_RetryBuild(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/123/retry", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123/retry", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 124}`)
 	})
@@ -767,7 +779,7 @@ func TestClient_RetryBuild(t *testing.T) {
 func TestClient_CancelBuild(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/123/cancel", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123/cancel", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
 	})
@@ -786,7 +798,7 @@ func TestClient_CancelBuild(t *testing.T) {
 func TestClient_ClearCache(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/build-cache", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/build-cache", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 		fmt.Fprint(w, `{"status": "cache cleared"}`)
 	})
@@ -805,7 +817,7 @@ func TestClient_ClearCache(t *testing.T) {
 func TestClient_AddEnvVar(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"name":"bar","value":"baz"}`)
 		fmt.Fprint(w, `{"name": "bar"}`)
@@ -825,7 +837,7 @@ func TestClient_AddEnvVar(t *testing.T) {
 func TestClient_ListEnvVars(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testBody(t, r, "")
 		fmt.Fprint(w, `[{"name": "bar", "value":"xxxbar"}]`)
@@ -848,7 +860,7 @@ func TestClient_ListEnvVars(t *testing.T) {
 func TestClient_DeleteEnvVar(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/envvar/bar", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/envvar/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -862,7 +874,7 @@ func TestClient_DeleteEnvVar(t *testing.T) {
 func TestClient_AddSSHKey(t *testing.T) {
 	setup()
 	defer teardown()
-	mux.HandleFunc("/project/jszwedko/foo/ssh-key", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/ssh-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"hostname":"example.com","private_key":"some-key"}`)
 		w.WriteHeader(http.StatusCreated)
@@ -951,7 +963,7 @@ func TestClient_ListCheckoutKeys(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprintf(w, `[{
 			"public_key": "some public key",
@@ -983,7 +995,7 @@ func TestClient_CreateCheckoutKey(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"type":"github-user-key"}`)
 		fmt.Fprintf(w, `{
@@ -1017,7 +1029,7 @@ func TestClient_GetCheckoutKey(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprintf(w, `{
 			"public_key": "some public key",
@@ -1049,7 +1061,7 @@ func TestClient_DeleteCheckoutKey(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 		fmt.Fprintf(w, `{"message": "ok"}`)
 	})
@@ -1064,7 +1076,7 @@ func TestClient_AddSSHUser(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/project/jszwedko/foo/123/ssh-users", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/project/jszwedko/foo/123/ssh-users", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"ssh_users": [{"github_id": 1234, "login": "jszwedko"}]}`)
 	})
@@ -1084,7 +1096,7 @@ func TestClient_AddHerokuKey(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/user/heroku-key", func(w http.ResponseWriter, r *http.Request) {
+	cciFunc("v1", "/user/heroku-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"apikey":"53433a12-9c99-11e5-97f5-1458d009721"}`)
 		fmt.Fprint(w, `""`)
